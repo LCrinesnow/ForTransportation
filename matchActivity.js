@@ -14,6 +14,33 @@ var sequelize = new Sequelize(config.database, config.username, config.password,
         idle: 30000
     }
 });
+
+// in: 2 list(teams,pois) 
+// flow: getObjListxK ->vote by location ->recursively remove teamID
+// out: map
+function matchActivity(teams,pois){
+   
+  var objListxK = getObjListxK(teams,pois,ubilabs)
+  var vote = generateVote(objListxK)
+  console.log("trying!!:"+vote)
+  for(let v of vote){
+            console.log("v:"+v)
+  }  
+ 
+  //var res = getMaxPplLocAndDelItsTeams(vote);
+  //var act2Store = res[0]
+  //vote = res[1]
+/*  var res = looping(vote) 
+  var matchedTeams = res[0]
+  var residueVote = res[1]
+*/
+  //match the rest of vote pool
+  //var matchedTeams = matchRest(residueVote,matchedTeams1)  
+
+ // console.log('matchedTeams2:'+JSON.stringify(matchedTeams))
+
+}
+
 //in: 2 list(teams,pois) 
 //use: kdTree
 //out: 1 list  [{teamID:xxx,lat:xxx,log:xxx,count:x},{},{}...{}] x K places
@@ -57,6 +84,7 @@ function getObjListxK(teams,pois,ubilabs){
 	}
 	return res;
 }
+
 //in :objListxK list
 //out : map of (location ===> teamID1,teamID2...)
 function generateVote(objListxK){
@@ -79,17 +107,21 @@ function generateVote(objListxK){
   
   return vote
 }
-//count how many people an Activity location have.
-//in : all teams in one location
-//out : this location has "count" people
-function countPeople(teams){
-    console.log("teams"+teams)
-    var count = 0
-    for(let team of teams){
-	count = Number(team.split("cnt:")[1])+count;
-    }
-    return count;
+//function:iterate through the vote pool and grab matchedTeams
+//in:vote pool
+//out:matchedTeams and residue vote pool
+function looping(vote){
+   var matchedTeams = [] 
+   var res = []
+   while(JSON.stringify(res[0])!=='[]'){
+     //lastVote = new Map(vote)   //deep copy vote map
+     res = getMaxPplLocAndDelItsTeams(vote);
+     matchedTeams.push(res[0])
+     vote = res[1]
+   }
+   return [matchedTeams,vote]
 }
+
 //delete the teams of that location
 //in : vote
 //out: activityToStore -> the deleted teams and its Location. Ready for storage.
@@ -126,19 +158,52 @@ function getMaxPplLocAndDelItsTeams(vote){
     return [matchedTeams,unMatchedTeams]
   }
 }
-//function:pull teams to the largest team. By using the largest team as centroid and calculate the smallest distance sum.
-//implementation:use activityNeededPeople minus the largest number of team and find the number of people needed. go through the combinationSumII to get the combination.
-//in:candidates,maxPplLoc, activityNeededPeople
-//out:list of pulled team(matched teams)
-function judgeWhoToPull(candidates,maxPplLoc, activityNeededPeople){
-  var list = []
-  var centroid_address = maxPplLoc[0]   //address
-  var centroid_cnt = maxPplLoc[1].totalcnt //num
-  var centroid_list = maxPplLoc[1].list //team id list
-  var minus = activityNeededPeople - centroid_cnt
-  //var combos = combinationSumII(candidates, 2)
-  //console.log("combos"+JSON.stringify(combos))
-  return list
+
+//function:get the Location with Max people and count each row's number of people
+//in:vote map in this round 
+//out:the Location with the most amount of people.  maxPplLoc[0]->(lat log add)  maxPplLoc[1]->(team1:1,team2:3,team3:2...)
+function getMaxPplLocAndCount(vote){
+  var maxPplLoc = {}
+  var temp = {}
+  for(let v of vote){
+
+    v[1].totalcnt = countPeople(v[1].list)
+    
+    // deep copy v to maxPplLoc by stringify and parse
+    if(JSON.stringify(temp)==='{}'){
+	temp =v
+    }else if(temp[1].totalcnt < v[1].totalcnt ){
+	temp =v
+    }else{
+       continue;
+    }
+  }
+  maxPplLoc[0] = temp[0]
+  maxPplLoc[1] ={
+    list : temp[1].list,
+    totalcnt : temp[1].totalcnt
+  }
+  console.log("UUUUUU"+maxPplLoc[0])
+  return [maxPplLoc,vote] 
+}
+
+//function:turn list into a object array  [team1:1,team2:3,team3:2....]
+//in: list
+//out:object array
+function obj2array(maxPplLoc){
+  console.log("1111111111111"+ JSON.stringify(maxPplLoc))
+  var list = maxPplLoc[1].list
+  var objarray = []
+  for(let i=0;i<list.length;i++){
+    var temp = list[i].split("cnt:")
+    var ele = {
+ 	teamid:temp[0],
+	num:temp[1]
+    }
+    objarray.push(ele)
+  }
+  console.log("print objarray:"+JSON.stringify(objarray))
+  return objarray
 }
 
 //function:take the rest of vote and turn them to 
@@ -163,6 +228,22 @@ function voteEle2candidates(restVote){
 
    return candidates
 }
+
+//function:pull teams to the largest team. By using the largest team as centroid and calculate the smallest distance sum.
+//implementation:use activityNeededPeople minus the largest number of team and find the number of people needed. go through the combinationSumII to get the combination.
+//in:candidates,maxPplLoc, activityNeededPeople
+//out:list of pulled team(matched teams)
+function judgeWhoToPull(candidates,maxPplLoc, activityNeededPeople){
+  var list = []
+  var centroid_address = maxPplLoc[0]   //address
+  var centroid_cnt = maxPplLoc[1].totalcnt //num
+  var centroid_list = maxPplLoc[1].list //team id list
+  var minus = activityNeededPeople - centroid_cnt
+  //var combos = combinationSumII(candidates, 2)
+  //console.log("combos"+JSON.stringify(combos))
+  return list
+}
+
 
 
 //function:regulate the teams into a particular number. eg:location:19 people, subtract it to 9 for basketball
@@ -199,24 +280,7 @@ function combinationSumII(candidates, target){
   return solutions;
 }
 
-//function:turn list into a object array  [team1:1,team2:3,team3:2....]
-//in: list
-//out:object array
-function obj2array(maxPplLoc){
-  console.log("1111111111111"+ JSON.stringify(maxPplLoc))
-  var list = maxPplLoc[1].list
-  var objarray = []
-  for(let i=0;i<list.length;i++){
-    var temp = list[i].split("cnt:")
-    var ele = {
- 	teamid:temp[0],
-	num:temp[1]
-    }
-    objarray.push(ele)
-  }
-  console.log("print objarray:"+JSON.stringify(objarray))
-  return objarray
-}
+
 
 //function:delete maxPplLoc in the vote pool(map)
 //in:matchedTeams and vote pool(map)
@@ -254,73 +318,7 @@ function deleteTeams(matchedTeams,vote){
 */
   return vote
 }
-//function:get the Location with Max people and count each row's number of people
-//in:vote map in this round 
-//out:the Location with the most amount of people.  maxPplLoc[0]->(lat log add)  maxPplLoc[1]->(team1:1,team2:3,team3:2...)
-function getMaxPplLocAndCount(vote){
-  var maxPplLoc = {}
-  var temp = {}
-  for(let v of vote){
 
-    v[1].totalcnt = countPeople(v[1].list)
-    
-    // deep copy v to maxPplLoc by stringify and parse
-    if(JSON.stringify(temp)==='{}'){
-	temp =v
-    }else if(temp[1].totalcnt < v[1].totalcnt ){
-	temp =v
-    }else{
-       continue;
-    }
-  }
-  maxPplLoc[0] = temp[0]
-  maxPplLoc[1] ={
-    list : temp[1].list,
-    totalcnt : temp[1].totalcnt
-  }
-  console.log("UUUUUU"+maxPplLoc[0])
-  return [maxPplLoc,vote] 
-}
-
-// in: 2 list(teams,pois) 
-// flow: getObjListxK ->vote by location ->recursively remove teamID
-// out: map
-function matchActivity(teams,pois){
-   
-  var objListxK = getObjListxK(teams,pois,ubilabs)
-  var vote = generateVote(objListxK)
-  console.log("trying!!:"+vote)
-  for(let v of vote){
-            console.log("v:"+v)
-  }  
- 
-  //var res = getMaxPplLocAndDelItsTeams(vote);
-  //var act2Store = res[0]
-  //vote = res[1]
-/*  var res = looping(vote) 
-  var matchedTeams = res[0]
-  var residueVote = res[1]
-*/
-  //match the rest of vote pool
-  //var matchedTeams = matchRest(residueVote,matchedTeams1)  
-
- // console.log('matchedTeams2:'+JSON.stringify(matchedTeams))
-
-}
-//function:iterate through the vote pool and grab matchedTeams
-//in:vote pool
-//out:matchedTeams and residue vote pool
-function looping(vote){
-   var matchedTeams = [] 
-   var res = []
-   while(JSON.stringify(res[0])!=='[]'){
-     //lastVote = new Map(vote)   //deep copy vote map
-     res = getMaxPplLocAndDelItsTeams(vote);
-     matchedTeams.push(res[0])
-     vote = res[1]
-   }
-   return [matchedTeams,vote]
-}
 
 //function:take the rest of vote and match team stochastically->based on centroid coordinates
 //in: the rest of vote pool,matchedTeams(after looping) 
@@ -421,7 +419,17 @@ function storeActivity(act2Store){
     })(); 
 }
 
-
+//count how many people an Activity location have.
+//in : all teams in one location
+//out : this location has "count" people
+function countPeople(teams){
+    console.log("teams"+teams)
+    var count = 0
+    for(let team of teams){
+	count = Number(team.split("cnt:")[1])+count;
+    }
+    return count;
+}
 
 module.exports ={ matchActivity };
 
